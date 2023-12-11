@@ -1,0 +1,88 @@
+#include <msp430.h>
+
+unsigned int ADC_Value; // Variable to store ADC value
+
+int main(void)
+{
+    WDTCTL = WDTPW | WDTHOLD; // Stop watchdog timer
+
+    // Configure pins for Motor and LED
+    P1DIR |= BIT5; // AIN1
+    P1OUT |= BIT5; // Set AIN1 high
+
+    P1DIR |= BIT7; // PWMA
+    P1OUT |= BIT7; // Set PWMA high
+
+    P1DIR |= BIT6; // AIN2
+    P1OUT &= ~BIT6; // Set AIN2 low
+
+    P4DIR |= BIT7; // LED on P4.7
+    P4OUT &= ~BIT7; // Initialize LED OFF
+
+    // Configure Timer_B0 for PWM
+    P1SEL1 = BIT2;
+    P1SEL0 = BIT2;
+
+    TB0CTL |= TBCLR; // Clear Timer_B0
+    TB0CTL |= TBSSEL__SMCLK; // Select SMCLK as the clock source
+    TB0CTL |= MC__UP; // Set Timer_B0 to UP mode
+    TB0CCR0 = 4096; // Set Timer_B0 period
+    TB0CCR1 = 2000; // Set initial PWM duty cycle
+
+    TB0CCTL0 |= CCIE; // Enable Timer_B0 CCR0 interrupt
+    TB0CCTL0 &= ~CCIFG; // Clear CCR0 interrupt flag
+    TB0CCTL1 |= CCIE; // Enable Timer_B0 CCR1 interrupt
+    TB0CCTL1 &= ~CCIFG; // Clear CCR1 interrupt flag
+
+    // Configure ADC for potentiometer input
+    ADCCTL0 &= ~ADCSHT; // Clear ADCSHT bits
+    ADCCTL0 |= ADCSHT_2; // Set ADC sample-and-hold time to 16 clock cycles
+    ADCCTL0 |= ADCON; // Turn on ADC
+
+    ADCCTL1 |= ADCSSEL_2; // Select SMCLK as the ADC clock source
+    ADCCTL1 |= ADCSHP; // Enable sample-and-hold pulse mode
+
+    ADCCTL2 &= ~ADCRES; // Clear ADCRES bits
+    ADCCTL2 |= ADCRES_2; // Set ADC resolution to 12-bit
+
+    ADCMCTL0 |= ADCINCH_2; // Select A2 input channel for ADC
+
+    ADCIE |= ADCIE0; // Enable ADC interrupt
+
+    __enable_interrupt(); // Enable global interrupts
+
+    while (1)
+    {
+        ADCCTL0 |= ADCENC + ADCSC; // Start ADC conversion
+        __bis_SR_register(CPUOFF + GIE); // Enter LPM0 (low-power mode 0)
+    }
+
+    return 0;
+}
+
+// Timer_B0 CCR0 interrupt service routine
+#pragma vector=TIMER0_B0_VECTOR
+__interrupt void ISR_TB0_CCR0(void)
+{
+    P1OUT |= BIT7; // Turn Motor ON
+    P4OUT |= BIT7; // Turn LED ON
+    TB0CCTL0 &= ~CCIFG; // Clear CCR0 interrupt flag
+}
+
+// Timer_B0 CCR1 interrupt service routine
+#pragma vector=TIMER0_B1_VECTOR
+__interrupt void ISR_TB0_CCR1(void)
+{
+    P1OUT &= ~BIT7; // Turn Motor OFF
+    P4OUT &= ~BIT7; // Turn LED OFF
+    TB0CCTL1 &= ~CCIFG; // Clear CCR1 interrupt flag
+}
+
+// ADC interrupt service routine
+#pragma vector=ADC_VECTOR
+__interrupt void ADC_ISR(void)
+{
+    ADC_Value = ADCMEM0; // Read ADC conversion result
+    TB0CCR1 = ADC_Value; // Set PWM duty cycle based on ADC value
+    __bic_SR_register_on_exit(CPUOFF); // Exit LPM0
+}
